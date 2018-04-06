@@ -141,7 +141,21 @@ pub struct BlockBasedOptions {
 pub enum MemtableFactory {
     Vector,
     HashSkipList { bucket_count: usize, height: i32, branching_factor: i32 },
-    HashLinkList { bucket_count: usize }
+    HashLinkList { bucket_count: usize },
+}
+
+/// Used by BlockBasedOptions::set_index_type.
+pub enum BlockBasedIndexType {
+    /// A space efficient index block that is optimized for
+    /// binary-search-based index.
+    BinarySearch,
+
+    /// The hash index, if enabled, will perform a hash lookup if
+    /// a prefix extractor has been provided through Options::set_prefix_extractor.
+    HashSearch,
+
+    /// A two-level index implementation. Both levels are binary search indexes.
+    TwoLevelIndexSearch,
 }
 
 /// Database-wide options around performance and behavior.
