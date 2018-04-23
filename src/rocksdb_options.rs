@@ -532,6 +532,8 @@ pub struct DBOptions {
     pub inner: *mut Options,
 }
 
+unsafe impl Send for DBOptions {}
+
 impl Drop for DBOptions {
     fn drop(&mut self) {
         unsafe {
