@@ -35,6 +35,7 @@ pub fn new_bloom_filter(bits: c_int) -> *mut ffi::rocksdb_filterpolicy_t {
 
 unsafe impl Send for DB {}
 unsafe impl Sync for DB {}
+unsafe impl Send for ColumnFamily {}
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum DBCompressionType {
