@@ -13,11 +13,9 @@
 // limitations under the License.
 
 use std::ffi::CString;
-use std::mem;
-use std::ptr;
 use std::slice;
 
-use libc::{self, c_char, c_void, size_t};
+use libc::{c_char, c_void, size_t};
 
 use ffi;
 
