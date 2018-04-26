@@ -1,6 +1,18 @@
 extern crate rocksdb;
 
-use rocksdb::{DB, Options, SliceTransform};
+use rocksdb::{DB, Options, SliceTransform, SliceTransformFns};
+
+struct TestTransformFns;
+
+impl SliceTransformFns for TestTransformFns {
+    fn transform<'a>(&mut self, key: &'a [u8]) -> &'a [u8] {
+        &key[..3]
+    }
+
+    fn in_domain(&mut self, _: &[u8]) -> bool {
+        true
+    }
+}
 
 #[test]
 pub fn test_slice_transform() {
@@ -11,11 +23,7 @@ pub fn test_slice_transform() {
     let b1: Box<[u8]> = key(b"bbb1");
     let b2: Box<[u8]> = key(b"bbb2");
 
-    fn first_three(k: &[u8]) -> Vec<u8> {
-        k.iter().take(3).cloned().collect()
-    }
-
-    let prefix_extractor = SliceTransform::create("first_three", first_three, None);
+    let prefix_extractor = SliceTransform::create("first_three", Box::new(TestTransformFns));
 
     let mut opts = Options::default();
     opts.create_if_missing(true);

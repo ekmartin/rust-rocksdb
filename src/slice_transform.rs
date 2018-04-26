@@ -25,52 +25,66 @@ use ffi;
 /// to another. Its primary use-case is in configuring rocksdb
 /// to store prefix blooms by setting prefix_extractor in
 /// ColumnFamilyOptions.
+pub trait SliceTransformFns {
+    // Extract a prefix from a specified key
+    fn transform<'a>(&mut self, key: &'a [u8]) -> &'a [u8];
+
+    // Determine whether the specified key is compatible with the logic
+    // specified in the Transform method. This method is invoked for every
+    // key that is inserted into the db. If this method returns true,
+    // then Transform is called to translate the key to its prefix and
+    // that returned prefix is inserted into the bloom filter. If this
+    // method returns false, then the call to Transform is skipped and
+    // no prefix is inserted into the bloom filters.
+    fn in_domain(&mut self, key: &[u8]) -> bool;
+
+    // This is currently not used and remains here for backward compatibility.
+    fn in_range(&mut self, _: &[u8]) -> bool {
+        true
+    }
+}
+
+/// The result of calling rocksdb_slice_transform_create.
 pub struct SliceTransform {
     pub inner: *mut ffi::rocksdb_slicetransform_t,
+}
+
+/// Passed on to rocksdb and used to retrieve the functions defined in SliceTransformFns.
+#[repr(C)]
+pub struct SliceTransformState {
+    name: CString,
+    transform: Box<SliceTransformFns>,
 }
 
 // NB we intentionally don't implement a Drop that passes
 // through to rocksdb_slicetransform_destroy because
 // this is currently only used (to my knowledge)
 // by people passing it as a prefix extractor when
-// opening a DB. 
+// opening a DB.
 
 impl SliceTransform {
     pub fn create(
         name: &str,
-        transform_fn: TransformFn,
-        in_domain_fn: Option<InDomainFn>,
-    ) -> SliceTransform{
-        let cb = Box::new(TransformCallback {
-            name: CString::new(name.as_bytes()).unwrap(),
-            transform_fn: transform_fn,
-            in_domain_fn: in_domain_fn,
-        });
+        fns: Box<SliceTransformFns>,
+    ) -> SliceTransform {
+        let c_name = CString::new(name.as_bytes()).unwrap();
+        let proxy = Box::into_raw(Box::new(SliceTransformState {
+            name: c_name,
+            transform: fns,
+        }));
 
-        let st = unsafe {
-             ffi::rocksdb_slicetransform_create(
-                mem::transmute(cb),
-                Some(slice_transform_destructor_callback),
-                Some(transform_callback),
-
-                // this is ugly, but I can't get the compiler
-                // not to barf with "expected fn pointer, found fn item"
-                // without this. sorry.
-                if let Some(_) = in_domain_fn {
-                    Some(in_domain_callback)
-                } else {
-                    None
-                },
-
-                // this None points to the deprecated InRange callback
-                None,
-                Some(slice_transform_name_callback),
+        let inner = unsafe {
+            ffi::rocksdb_slicetransform_create(
+                proxy as *mut c_void,
+                Some(destructor),
+                Some(transform),
+                Some(in_domain),
+                Some(in_range),
+                Some(get_name),
             )
         };
 
-        SliceTransform {
-            inner: st
-        }
+        SliceTransform { inner }
     }
 
     pub fn create_fixed_prefix(len: size_t) -> SliceTransform {
@@ -90,60 +104,35 @@ impl SliceTransform {
     }
 }
 
-pub type TransformFn = fn(&[u8]) -> Vec<u8>;
-pub type InDomainFn = fn(&[u8]) -> bool;
-
-pub struct TransformCallback {
-	pub name: CString,
-	pub transform_fn: TransformFn,
-	pub in_domain_fn: Option<InDomainFn>,
+unsafe extern "C" fn get_name(transform: *mut c_void) -> *const c_char {
+    (*(transform as *mut SliceTransformState)).name.as_ptr()
 }
 
-pub unsafe extern "C" fn slice_transform_destructor_callback(
-    raw_cb: *mut c_void
-) {
-	let transform: Box<TransformCallback> = mem::transmute(raw_cb);
-	drop(transform);
+unsafe extern "C" fn destructor(transform: *mut c_void) {
+    Box::from_raw(transform as *mut SliceTransformState);
 }
 
-pub unsafe extern "C" fn slice_transform_name_callback(
-    raw_cb: *mut c_void
-) -> *const c_char {
-	let cb = &mut *(raw_cb as *mut TransformCallback);
-	cb.name.as_ptr()
-}
-
-pub unsafe extern "C" fn transform_callback(
-	raw_cb: *mut c_void,
-	raw_key: *const c_char,
-	key_len: size_t,
-	dst_length: *mut size_t,
+unsafe extern "C" fn transform(
+    transform: *mut c_void,
+    key: *const c_char,
+    key_len: size_t,
+    dest_len: *mut size_t,
 ) -> *mut c_char {
-	let cb = &mut *(raw_cb as *mut TransformCallback);
-	let key = slice::from_raw_parts(raw_key as *const u8, key_len as usize);
-	let mut result = (cb.transform_fn)(key);
-    result.shrink_to_fit();
-
-    // copy the result into a C++ destroyable buffer
-    let buf = libc::malloc(result.len() as size_t);
-    assert!(!buf.is_null());
-    ptr::copy(result.as_ptr() as *mut c_void, &mut *buf, result.len());
-
-    *dst_length = result.len() as size_t;
-    buf as *mut c_char
+    let transform = &mut *(transform as *mut SliceTransformState);
+    let key = slice::from_raw_parts(key as *const u8, key_len);
+    let prefix = transform.transform.transform(key);
+    *dest_len = prefix.len() as size_t;
+    prefix.as_ptr() as *mut c_char
 }
 
-pub unsafe extern "C" fn in_domain_callback(
-    raw_cb: *mut c_void,
-	raw_key: *const c_char,
-	key_len: size_t,
-) -> u8 {
-	let cb = &mut *(raw_cb as *mut TransformCallback);
-	let key = slice::from_raw_parts(raw_key as *const u8, key_len as usize);
+unsafe extern "C" fn in_domain(transform: *mut c_void, key: *const c_char, key_len: size_t) -> u8 {
+    let transform = &mut *(transform as *mut SliceTransformState);
+    let key = slice::from_raw_parts(key as *const u8, key_len);
+    transform.transform.in_domain(key) as u8
+}
 
-    if (cb.in_domain_fn.unwrap())(key) {
-        1
-    } else {
-        0
-    }
+unsafe extern "C" fn in_range(transform: *mut c_void, key: *const c_char, key_len: size_t) -> u8 {
+    let transform = &mut *(transform as *mut SliceTransformState);
+    let key = slice::from_raw_parts(key as *const u8, key_len);
+    transform.transform.in_range(key) as u8
 }

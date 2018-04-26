@@ -65,7 +65,7 @@ pub use db::{DBCompactionStyle, DBCompressionType, DBIterator, DBRawIterator, DB
              DBVector, ReadOptions, Direction, IteratorMode, Snapshot, WriteBatch,
              new_bloom_filter};
 
-pub use slice_transform::SliceTransform;
+pub use slice_transform::{SliceTransform, SliceTransformFns};
 
 pub use merge_operator::MergeOperands;
 use std::collections::BTreeMap;
