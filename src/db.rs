@@ -779,18 +779,16 @@ impl DB {
         }
 
         unsafe {
-            let mut val_len: size_t = 0;
-            let val = ffi_try!(ffi::rocksdb_get(
+            let val = ffi_try!(ffi::rocksdb_get_pinned(
                 self.inner,
                 readopts.inner,
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
-                &mut val_len,
-            )) as *mut u8;
+            ));
             if val.is_null() {
                 Ok(None)
             } else {
-                Ok(Some(DBVector::from_c(val, val_len)))
+                Ok(Some(DBVector::from_pinned_slice(val)))
             }
         }
     }
@@ -818,19 +816,17 @@ impl DB {
         }
 
         unsafe {
-            let mut val_len: size_t = 0;
-            let val = ffi_try!(ffi::rocksdb_get_cf(
+            let val = ffi_try!(ffi::rocksdb_get_pinned_cf(
                 self.inner,
                 readopts.inner,
                 cf.inner,
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
-                &mut val_len,
-            )) as *mut u8;
+            ));
             if val.is_null() {
                 Ok(None)
             } else {
-                Ok(Some(DBVector::from_c(val, val_len)))
+                Ok(Some(DBVector::from_pinned_slice(val)))
             }
         }
     }
@@ -1322,52 +1318,33 @@ impl Default for ReadOptions {
     }
 }
 
-/// Vector of bytes stored in the database.
-///
-/// This is a `C` allocated byte array and a length value.
-/// Normal usage would be to utilize the fact it implements `Deref<[u8]>` and use it as
-/// a slice.
 pub struct DBVector {
-    base: *mut u8,
-    len: usize,
+    pinned_slice: *mut ffi::rocksdb_pinnableslice_t,
 }
 
 impl Deref for DBVector {
     type Target = [u8];
-
     fn deref(&self) -> &[u8] {
-        unsafe { slice::from_raw_parts(self.base, self.len) }
+        let mut val_len: size_t = 0;
+        let val_len_ptr = &mut val_len as *mut size_t;
+        unsafe {
+            let val = ffi::rocksdb_pinnableslice_value(self.pinned_slice, val_len_ptr) as *const u8;
+            slice::from_raw_parts(val, val_len)
+        }
     }
 }
 
 impl Drop for DBVector {
     fn drop(&mut self) {
         unsafe {
-            libc::free(self.base as *mut c_void);
+            ffi::rocksdb_pinnableslice_destroy(self.pinned_slice);
         }
     }
 }
 
 impl DBVector {
-    /// Used internally to create a DBVector from a `C` memory block
-    ///
-    /// # Unsafe
-    /// Requires that the ponter be allocated by a `malloc` derivative (all C libraries), and
-    /// `val_len` be the length of the C array to be safe (since `sizeof(u8) = 1`).
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let buf_len: libc::size_t = unsafe { mem::uninitialized() };
-    /// // Assume the function fills buf_len with the length of the returned array
-    /// let buf: *mut u8 = unsafe { ffi_function_returning_byte_array(&buf_len) };
-    /// DBVector::from_c(buf, buf_len)
-    /// ```
-    pub unsafe fn from_c(val: *mut u8, val_len: size_t) -> DBVector {
-        DBVector {
-            base: val,
-            len: val_len as usize,
-        }
+    pub unsafe fn from_pinned_slice(s: *mut ffi::rocksdb_pinnableslice_t) -> DBVector {
+        DBVector { pinned_slice: s }
     }
 
     /// Convenience function to attempt to reinterperet value as string.
@@ -1377,17 +1354,6 @@ impl DBVector {
         str::from_utf8(self.deref()).ok()
     }
 }
-
-#[test]
-fn test_db_vector() {
-    use std::mem;
-    let len: size_t = 4;
-    let data: *mut u8 = unsafe { mem::transmute(libc::calloc(len, mem::size_of::<u8>())) };
-    let v = unsafe { DBVector::from_c(data, len) };
-    let ctrl = [0u8, 0, 0, 0];
-    assert_eq!(&*v, &ctrl[..]);
-}
-
 
 #[test]
 fn external() {
