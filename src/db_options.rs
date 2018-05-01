@@ -41,6 +41,33 @@ impl Drop for Options {
     }
 }
 
+pub struct RateLimiter {
+    inner: *mut ffi::rocksdb_ratelimiter_t,
+}
+
+impl RateLimiter {
+    pub fn new(rate_bytes_per_sec: i64, refill_period_us: i64, fairness: i32) -> RateLimiter {
+        let limiter = unsafe {
+            ffi::rocksdb_ratelimiter_create(
+                rate_bytes_per_sec,
+                refill_period_us,
+                fairness,
+            )
+        };
+
+        RateLimiter { inner: limiter }
+    }
+}
+
+impl Drop for RateLimiter {
+    fn drop(&mut self) {
+        unsafe { ffi::rocksdb_ratelimiter_destroy(self.inner) }
+    }
+}
+
+const DEFAULT_REFILL_PERIOD_US: i64 = 100 * 1000; // 100ms should work for most cases
+const DEFAULT_FAIRNESS: i32 = 10; // should be good by leaving it at default 10
+
 impl Drop for BlockBasedOptions {
     fn drop(&mut self) {
         unsafe {
@@ -153,6 +180,18 @@ impl Options {
                 self.inner,
                 memtable_memory_budget as uint64_t,
             );
+        }
+    }
+
+    pub fn set_ratelimiter(&mut self, bytes_per_sec: i64) {
+        let rate_limiter = RateLimiter::new(
+            bytes_per_sec,
+            DEFAULT_REFILL_PERIOD_US,
+            DEFAULT_FAIRNESS,
+        );
+
+        unsafe {
+            ffi::rocksdb_options_set_ratelimiter(self.inner, rate_limiter.inner);
         }
     }
 
