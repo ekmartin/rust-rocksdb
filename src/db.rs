@@ -28,7 +28,6 @@ use std::path::Path;
 use std::ptr;
 use std::slice;
 use std::str;
-use std::ffi::CStr;
 
 pub fn new_bloom_filter(bits: c_int) -> *mut ffi::rocksdb_filterpolicy_t {
     unsafe { ffi::rocksdb_filterpolicy_create_bloom(bits) }
