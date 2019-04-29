@@ -226,7 +226,7 @@ impl<'a> DBRawIterator<'a> {
     ) -> Result<DBRawIterator<'a>, Error> {
         unsafe {
             Ok(DBRawIterator {
-                inner: ffi::rocksdb_create_iterator_cf(db.inner, readopts.inner, cf_handle.inner),
+                inner: ffi::rocksdb_create_iterator_cf(db.inner, readopts.inner, cf_handle.inner.as_ptr()),
                 db: PhantomData,
             })
         }
@@ -930,7 +930,7 @@ impl DB {
             let val = ffi_try!(ffi::rocksdb_get_cf(
                 self.inner,
                 readopts.inner,
-                cf.inner,
+                cf.inner.as_ptr(),
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
                 &mut val_len,
@@ -1017,7 +1017,7 @@ impl DB {
             let val = ffi_try!(ffi::rocksdb_get_pinned_cf(
                 self.inner,
                 readopts.inner,
-                cf.inner,
+                cf.inner.as_ptr(),
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
             ));
@@ -1064,7 +1064,7 @@ impl DB {
                 .insert(name.as_ref().to_string(), cf_handle);
 
             ColumnFamily {
-                inner: cf_handle,
+                inner: ptr::NonNull::new(cf_handle).unwrap(),
                 db: PhantomData,
             }
         };
@@ -1092,7 +1092,7 @@ impl DB {
     /// Return the underlying column family handle.
     pub fn cf_handle(&self, name: &str) -> Option<ColumnFamily> {
         self.cfs.read().ok()?.get(name).map(|h| ColumnFamily {
-            inner: *h,
+            inner: ptr::NonNull::new(*h).unwrap(),
             db: PhantomData,
         })
     }
@@ -1223,7 +1223,7 @@ impl DB {
             ffi_try!(ffi::rocksdb_put_cf(
                 self.inner,
                 writeopts.inner,
-                cf.inner,
+                cf.inner.as_ptr(),
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
                 value.as_ptr() as *const c_char,
@@ -1272,7 +1272,7 @@ impl DB {
             ffi_try!(ffi::rocksdb_merge_cf(
                 self.inner,
                 writeopts.inner,
-                cf.inner,
+                cf.inner.as_ptr(),
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
                 value.as_ptr() as *const c_char,
@@ -1312,7 +1312,7 @@ impl DB {
             ffi_try!(ffi::rocksdb_delete_cf(
                 self.inner,
                 writeopts.inner,
-                cf.inner,
+                cf.inner.as_ptr(),
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
             ));
@@ -1387,7 +1387,7 @@ impl DB {
 
             ffi::rocksdb_compact_range_cf(
                 self.inner,
-                cf.inner,
+                cf.inner.as_ptr(),
                 opt_bytes_to_ptr(start),
                 start.map_or(0, |s| s.len()) as size_t,
                 opt_bytes_to_ptr(end),
@@ -1478,7 +1478,7 @@ impl DB {
         };
 
         unsafe {
-            let value = ffi::rocksdb_property_value_cf(self.inner, cf.inner, prop_name.as_ptr());
+            let value = ffi::rocksdb_property_value_cf(self.inner, cf.inner.as_ptr(), prop_name.as_ptr());
             if value.is_null() {
                 return Ok(None);
             }
@@ -1589,7 +1589,7 @@ impl WriteBatch {
         unsafe {
             ffi::rocksdb_writebatch_put_cf(
                 self.inner,
-                cf.inner,
+                cf.inner.as_ptr(),
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
                 value.as_ptr() as *const c_char,
@@ -1630,7 +1630,7 @@ impl WriteBatch {
         unsafe {
             ffi::rocksdb_writebatch_merge_cf(
                 self.inner,
-                cf.inner,
+                cf.inner.as_ptr(),
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
                 value.as_ptr() as *const c_char,
@@ -1662,7 +1662,7 @@ impl WriteBatch {
         unsafe {
             ffi::rocksdb_writebatch_delete_cf(
                 self.inner,
-                cf.inner,
+                cf.inner.as_ptr(),
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
             );
@@ -1706,7 +1706,7 @@ impl WriteBatch {
         unsafe {
             ffi::rocksdb_writebatch_delete_range_cf(
                 self.inner,
-                cf.inner,
+                cf.inner.as_ptr(),
                 start_key.as_ptr() as *const c_char,
                 start_key.len() as size_t,
                 end_key.as_ptr() as *const c_char,

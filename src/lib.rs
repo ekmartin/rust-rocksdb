@@ -81,6 +81,7 @@ pub use merge_operator::MergeOperands;
 use std::collections::BTreeMap;
 use std::error;
 use std::fmt;
+use std::ptr;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -285,7 +286,7 @@ pub struct WriteOptions {
 /// in others
 #[derive(Copy, Clone)]
 pub struct ColumnFamily<'a> {
-    inner: *mut ffi::rocksdb_column_family_handle_t,
+    inner: ptr::NonNull<ffi::rocksdb_column_family_handle_t>,
     db: PhantomData<&'a DB>,
 }
 
